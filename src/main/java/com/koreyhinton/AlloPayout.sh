@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# DOCUMENTATION URLS
+#
+# SheetService setup / Read Values
+# https://developers.google.com/workspace/sheets/api/quickstart/java
+#
+# Append Values
+# https://developers.google.com/workspace/sheets/api/guides/values#java_4
+#
+# Update Values
+# https://developers.google.com/workspace/sheets/api/guides/values#java_2
+
 v=${1:-mn_}
 # maps
 export ${v}lp_SheetService=${v}SheetService
@@ -25,9 +36,17 @@ cat << EOF
     import java.io.IOException;
     import java.io.InputStream;
     import java.io.InputStreamReader;
+    import java.math.BigDecimal;
+    import java.math.RoundingMode;
     import java.security.GeneralSecurityException;
+    import java.text.DecimalFormat;
+    import java.text.NumberFormat;
+    import java.time.format.DateTimeFormatter;
+    import java.time.LocalDateTime;
+    import java.util.ArrayList;
     import java.util.Collections;
     import java.util.List;
+    import java.util.Locale;
 
     public class AlloPayout {
         public static void main(String[] args) throws Exception {
@@ -39,7 +58,6 @@ cat << EOF
                 throw new Exception("CREDENTIALS_FILE_PATH env var must be set");
             Sheets ${v}SheetService;
             try {
-            //https://developers.google.com/workspace/sheets/api/quickstart/java
                 NetHttpTransport httpTransport
                     = GoogleNetHttpTransport.newTrustedTransport();
                 JsonFactory jsonFactory = GsonFactory.getDefaultInstance();
