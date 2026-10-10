@@ -1,0 +1,25 @@
+# Ignore Gradle project-specific cache directory
+.gradle
+
+# Ignore Gradle build output directory
+build
+
+# Emacs autosave files
+\#*\#
+.\#*
+*~
+
+# java stuff
+
+*.jar
+
+# generated files
+
+*.java
+
+# gradle optional build (to avoid potential secrets)
+gradle.properties
+
+# environment variables
+.env
+
