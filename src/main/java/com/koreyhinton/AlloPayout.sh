@@ -10,11 +10,22 @@
 #
 # Update Values
 # https://developers.google.com/workspace/sheets/api/guides/values#java_2
+#
+# Batch clear
+# https://developers.google.com/resources/api-libraries/documentation/sheets/v4/java/latest/com/google/api/services/sheets/v4/Sheets.Spreadsheets.Values.html
+#
+# Batch clear values request
+# https://developers.google.com/resources/api-libraries/documentation/sheets/v4/java/latest/com/google/api/services/sheets/v4/model/BatchClearValuesRequest.html
 
 v=${1:-mn_}
 # maps
 export ${v}lp_SheetService=${v}SheetService
 export ${v}lp_SpreadsheetId=${v}SpreadsheetId
+export ${v}lp_DecimalFormat=${v}DecimalFormat
+export ${v}lp_DateTimeFormatter=${v}DateTimeFormatter
+export ${v}lt_SheetService=${v}SheetService
+export ${v}lt_SpreadsheetId=${v}SpreadsheetId
+export ${v}lt_DecimalFormat=${v}DecimalFormat
 
 cat << EOF
     package com.koreyhinton;
@@ -29,9 +40,12 @@ cat << EOF
     import com.google.api.client.json.JsonFactory;
     import com.google.api.client.json.gson.GsonFactory;
     import com.google.api.client.util.store.FileDataStoreFactory;
+    import com.google.api.services.sheets.v4.model.AppendValuesResponse;
+    import com.google.api.services.sheets.v4.model.BatchClearValuesRequest;
+    import com.google.api.services.sheets.v4.model.UpdateValuesResponse;
+    import com.google.api.services.sheets.v4.model.ValueRange;
     import com.google.api.services.sheets.v4.Sheets;
     import com.google.api.services.sheets.v4.SheetsScopes;
-    import com.google.api.services.sheets.v4.model.ValueRange;
     import java.io.FileNotFoundException;
     import java.io.IOException;
     import java.io.InputStream;
@@ -45,8 +59,13 @@ cat << EOF
     import java.time.LocalDateTime;
     import java.util.ArrayList;
     import java.util.Collections;
+    import java.util.HashMap;
+    import java.util.HashSet;
     import java.util.List;
     import java.util.Locale;
+    import java.util.Map;
+    import java.util.Set;
+    import com.koreyhinton.models.PersonAllowanceState;
 
     public class AlloPayout {
         public static void main(String[] args) throws Exception {
@@ -84,6 +103,13 @@ cat << EOF
                 System.out.println("Unable to initialize google sheet service");
                 throw e;
             }
+
+            DecimalFormat ${v}DecimalFormat = (DecimalFormat)NumberFormat
+                .getCurrencyInstance(Locale.US);
+            ${v}DecimalFormat.setParseBigDecimal(true);
+            DateTimeFormatter ${v}DateTimeFormatter = DateTimeFormatter.ofPattern(
+                "yyyy-MM-dd HH:mm:ss"
+            );
 
             ` ./AlloPayout-load-transactions.sh ${v}lt_ `
             ` ./AlloPayout-load-pending.sh ${v}lp_ `

@@ -2,15 +2,12 @@
 
 v=$1
 # maps
-. ${NSMAP}/bind ${v} SpreadsheetId SheetService
+. ${NSMAP}/bind ${v} SpreadsheetId SheetService DecimalFormat DateTimeFormatter
 
 cat << EOF
 
-    DateTimeFormatter ${v}DateTimeFormatter = DateTimeFormatter.ofPattern(
-        "yyyy-MM-dd HH:mm:ss"
-    );
     String ${v}Timestamp = LocalDateTime.now().format(
-        ${v}DateTimeFormatter
+        ${!date_time_formatter}
     );
 
     /* Opx State
@@ -69,9 +66,14 @@ cat << EOF
         throw new Exception("No data found in sheet: Weekly Allowance");
 
     List<List<Object>> ${v}AppendValues = new ArrayList<List<Object>>();
+    List<List<Object>> ${v}UpdateValues = new ArrayList<List<Object>>();
+
+    Set<Integer> ${v}TakenTaskIndices = new HashSet<>();
+    Map<Integer, PersonAllowanceState> ${v}PersonStateMap = new HashMap<>();
 
     boolean ${v}Once = false;
-    for (List row : ${v}Values) {
+    Integer ${v}I = 0; // person index map (skips header, 0 is first data row)
+    for (List row : ${v}Values) { // person rows
         if (!${v}Once) {
             ${v}Once = true;
             continue; // skip header row
@@ -86,11 +88,8 @@ cat << EOF
         for (List weeklyRow : ${v}WeeklyValues) {
             System.out.printf("personName: %s\n", (String)weeklyRow.get(0));
             if (personName.equals((String)weeklyRow.get(0))) {
-                DecimalFormat decimalFormat = (DecimalFormat)NumberFormat
-                    .getCurrencyInstance(Locale.US);
-                decimalFormat.setParseBigDecimal(true);
                 allowanceAmountInUsd
-                    = (BigDecimal)decimalFormat.parse((String)weeklyRow.get(1));
+                    = (BigDecimal)${!decimal_format}.parse((String)weeklyRow.get(1));
                 tasksPerWeek = Integer.parseInt((String)weeklyRow.get(2));
                 System.out.printf("%.2f, %d\n", allowanceAmountInUsd, tasksPerWeek);
                 break;
@@ -100,11 +99,10 @@ cat << EOF
         if (null == tasksPerWeek || 0 == tasksPerWeek)
             throw new Exception("No tasks found, divide by zero error");
 
-        // TODO: a normal (non-sticky) task should skip priority B person
-        //       if it got assigned to priority A person for this round of
-        //       pending tasks
-        // add to append list
-        Integer i = ((lastTaskIndex + 1) % (${v}TasksValues.size()-1)) + 1; //1-end
+        Integer lastAddedTaskIndex = null;
+
+        // task loop (priority pass: 1st of 2 passes)
+        Integer i = ((lastTaskIndex + 1) % (${v}TasksValues.size()-1)) + 1; //row 1 thru end
         Integer satisfiedTasks = 0;
         for (Integer j = 0; j < ${v}TasksValues.size(); j++) {
             // ignore j var
@@ -116,20 +114,22 @@ cat << EOF
             );
             boolean isPersonStickyTask = zeroTask && isPersonTask;
 
-            if (isPersonStickyTask) {
+            if (!${v}TakenTaskIndices.contains(j) && isPersonStickyTask) {
                 List<Object> cols = new ArrayList<Object>();
                 cols.add(${v}Timestamp);
-                cols.add("+");
+                cols.add("'+");
                 cols.add(personName);
                 cols.add(new BigDecimal(0));
                 cols.add("REQUIRED " + ${v}TasksValues.get(i).get(0));
                 cols.add("N"); // not approved yet
                 ${v}AppendValues.add(cols);
-            } else if (isPersonTask && satisfiedTasks < tasksPerWeek) {
+                ${v}TakenTaskIndices.add(i);
+                lastAddedTaskIndex = i;
+            } else if (!${v}TakenTaskIndices.contains(j) && isPersonTask && satisfiedTasks < tasksPerWeek) {
                 satisfiedTasks += 1;
                 List<Object> cols = new ArrayList<Object>();
                 cols.add(${v}Timestamp);
-                cols.add("+");
+                cols.add("'+");
                 cols.add(personName);
                 cols.add(allowanceAmountInUsd
                     .divide(
@@ -141,24 +141,96 @@ cat << EOF
                 cols.add(${v}TasksValues.get(i).get(0));
                 cols.add("N"); // not approved yet
                 ${v}AppendValues.add(cols);
+                ${v}TakenTaskIndices.add(i);
+                lastAddedTaskIndex = i;
             } // else skip other person's task
             i = ((i + 1) % (${v}TasksValues.size() - 1)) + 1; // row 1 thru end
         }
-        
+
+        PersonAllowanceState state = new PersonAllowanceState.Builder()
+            .lastTaskIndex(lastAddedTaskIndex)
+            .satisfiedTasks(satisfiedTasks)
+            .personName(personName)
+            .tasksPerWeek(tasksPerWeek)
+            .allowanceInUsd(allowanceAmountInUsd)
+            .build();
+
+        ${v}PersonStateMap.put(${v}I, state);
+
+        ${v}I += 1;
         System.out.println("-----\n\n");
     }
 
-    /* TODO: Update the updated last index values  */
+    ${v}Once = false;
+    ${v}I = 0;
+    for (List row : ${v}Values) {
+        if (!${v}Once) {
+            ${v}Once = true;
+            continue; // skip header row
+        }
 
-    /* TODO: uncomment, append pending tasks
-    ValueRange ${v}AppendResponse = ${!sheet_service}.spreadsheets().values()
+        PersonAllowanceState state = ${v}PersonStateMap.get(${v}I);
+
+        // task loop (no-priority pass: 2nd of 2 passes)
+        Integer i = ((state.lastTaskIndex + 1) % (${v}TasksValues.size()-1)) + 1; //1-end
+        Integer satisfiedTasks = 0;
+        for (Integer j = 0; j < ${v}TasksValues.size(); j++) {
+            // ignore j var
+            boolean zeroTask = "Y".equals(
+                (String)${v}TasksValues.get(i).get(1)
+            ); // pays $0 but is expected to be completed
+
+            if (!${v}TakenTaskIndices.contains(j) && !zeroTask && state.satisfiedTasks < state.tasksPerWeek) {
+                state.satisfiedTasks += 1;
+                List<Object> cols = new ArrayList<Object>();
+                cols.add(${v}Timestamp);
+                cols.add("'+");
+                cols.add(state.personName);
+                cols.add(state.allowanceInUsd
+                    .divide(
+                        new BigDecimal(state.tasksPerWeek),
+                        2,
+                        RoundingMode.HALF_UP
+                    )
+                );
+                cols.add(${v}TasksValues.get(i).get(0));
+                cols.add("N"); // not approved yet
+                ${v}AppendValues.add(cols);
+                ${v}TakenTaskIndices.add(i);
+                state.lastTaskIndex = i;
+            }
+            i = ((i + 1) % (${v}TasksValues.size() - 1)) + 1; // row 1 thru end
+        }
+
+
+        List<Object> updateCols = new ArrayList<Object>();
+        updateCols.add(state.personName);
+        updateCols.add(state.lastTaskIndex);
+        ${v}UpdateValues.add(updateCols);
+
+        ${v}I += 1;
+    }
+
+    ValueRange ${v}AppendValueRange = new ValueRange();
+    ${v}AppendValueRange.setValues(${v}AppendValues);
+    AppendValuesResponse ${v}AppendResponse = ${!sheet_service}.spreadsheets().values()
         .append(
             ${!spreadsheet_id},
-            "Pending Tasks!A:A",
-            new ValueRange().setValues(${v}AppendValues)
+            "Pending Transactions!A:A",
+            ${v}AppendValueRange
         )
+        .setValueInputOption("USER_ENTERED")
         .execute();
-    */
 
+    ValueRange ${v}UpdateValueRange = new ValueRange();
+    ${v}UpdateValueRange.setValues(${v}UpdateValues);
+    UpdateValuesResponse ${v}UpdateResponse = ${!sheet_service}.spreadsheets().values()
+        .update(
+            ${!spreadsheet_id},
+            "Opx State!A2:B3", // skip header row
+            ${v}UpdateValueRange
+        )
+        .setValueInputOption("USER_ENTERED")
+        .execute();
 
 EOF
