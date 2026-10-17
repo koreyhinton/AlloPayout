@@ -61,6 +61,10 @@ Next exit out of the ssh session so you can run scp to copy the files from
 the local machine over to the remote server, due to permissions you might need
 to copy somewhere else (your home dir) and move if you get a copy access error.
 
+- [ ] Todo: Modify below to put in the actual ssh configuration name!
+- [ ] Todo: Modify below to put it in an intermediate directory
+      (and use sudo mv)!
+
 ```sh
 scp ../credentials.json myssh:/etc/AlloPayout # assume exists 1 dir above repo
 scp ./build/libs/AlloPayout.jar myssh:/srv/AlloPayout/app.jar
@@ -78,15 +82,23 @@ sudo chmod 400 /etc/AlloPayout/credentials.json
 sudo chown allopayout:allopayout /etc/AlloPayout/credentials.json
 ```
 
-Create the /etc/cron.weekly/AlloPayout file with the following contents:
+Create the /etc/cron.weekly/AlloPayout file with the following contents, and be
+sure to replace SPREADSHEET_ID empty string with the actual spreadsheet id
+(the one from the address bar of the google sheet):
+
+- [ ] Todo: Modify below to put in the actual spreadsheet id!
 
 ```sh
 #!/bin/sh
 
 filedate=$(/usr/bin/date +%Y%m%d)
-exec /usr/sbin/runuser -u allopayout -- /usr/bin/java -jar /srv/AlloPayout/app.jar \
-    1>> /var/log/AlloPayout/AlloPayout_${filedate}.log \
-    2>&1
+exec /usr/sbin/runuser -u allopayout -- \
+    /usr/bin/env \
+        CREDENTIALS_FILE_PATH=/etc/AlloPayout/credentials.json \
+        SPREADSHEET_ID="" \
+        /usr/bin/java -jar /srv/AlloPayout/app.jar \
+            1>> /var/log/AlloPayout/AlloPayout_${filedate}.log \
+            2>&1
 ```
 
 Next set permissions on the file:
