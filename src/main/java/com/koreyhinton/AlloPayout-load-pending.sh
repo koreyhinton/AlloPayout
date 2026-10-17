@@ -79,19 +79,22 @@ cat << EOF
             continue; // skip header row
         }
         String personName = (String)row.get(0);
+
+        // lastTaskIndex's range is 1-n (or if set to 0 it is reassigned to n)
         Integer lastTaskIndex = Integer.parseInt((String)row.get(1));
+        if (lastTaskIndex == 0) lastTaskIndex = ${v}TasksValues.size()-1;
         System.out.printf("%s %d\n", personName, lastTaskIndex);
 
         BigDecimal allowanceAmountInUsd = BigDecimal.ZERO;
         Integer tasksPerWeek = null;
 
         for (List weeklyRow : ${v}WeeklyValues) {
-            System.out.printf("personName: %s\n", (String)weeklyRow.get(0));
+            // System.out.printf("personName: %s\n", (String)weeklyRow.get(0));
             if (personName.equals((String)weeklyRow.get(0))) {
                 allowanceAmountInUsd
                     = (BigDecimal)${!decimal_format}.parse((String)weeklyRow.get(1));
                 tasksPerWeek = Integer.parseInt((String)weeklyRow.get(2));
-                System.out.printf("%.2f, %d\n", allowanceAmountInUsd, tasksPerWeek);
+                // System.out.printf("%.2f, %d\n", allowanceAmountInUsd, tasksPerWeek);
                 break;
             }
         }
@@ -99,56 +102,37 @@ cat << EOF
         if (null == tasksPerWeek || 0 == tasksPerWeek)
             throw new Exception("No tasks found, divide by zero error");
 
-        Integer lastAddedTaskIndex = null;
-
-        // task loop (priority pass: 1st of 2 passes)
-        Integer i = ((lastTaskIndex + 1) % (${v}TasksValues.size()-1)) + 1; //row 1 thru end
+        // task loop (required pass: 1st of 3 passes)
         Integer satisfiedTasks = 0;
-        for (Integer j = 0; j < ${v}TasksValues.size(); j++) {
-            // ignore j var
+
+        for (Integer j = 0; j < ${v}TasksValues.size()-1; j++) { // -1 to skip header
+            // j + 1 for everything to start at the data row
+            System.out.printf("%d\n", j+1);
             boolean zeroTask = "Y".equals(
-                (String)${v}TasksValues.get(i).get(1)
+                ((String)${v}TasksValues.get(j+1).get(1)).toUpperCase()
             ); // pays $0 but is expected to be completed
             boolean isPersonTask = personName.equals(
-                (String)${v}TasksValues.get(i).get(2)
+                (String)${v}TasksValues.get(j+1).get(2)
             );
             boolean isPersonStickyTask = zeroTask && isPersonTask;
-
-            if (!${v}TakenTaskIndices.contains(j) && isPersonStickyTask) {
+            // System.out.printf("%d %b %b\n", j+1, zeroTask, isPersonTask);
+            if (!${v}TakenTaskIndices.contains(j+1) && isPersonStickyTask) {
                 List<Object> cols = new ArrayList<Object>();
                 cols.add(${v}Timestamp);
                 cols.add("'+");
                 cols.add(personName);
                 cols.add(new BigDecimal(0));
-                cols.add("REQUIRED " + ${v}TasksValues.get(i).get(0));
+                cols.add("REQUIRED " + ${v}TasksValues.get(j+1).get(0));
                 cols.add("N"); // not approved yet
                 ${v}AppendValues.add(cols);
-                ${v}TakenTaskIndices.add(i);
-                lastAddedTaskIndex = i;
-            } else if (!${v}TakenTaskIndices.contains(j) && isPersonTask && satisfiedTasks < tasksPerWeek) {
-                satisfiedTasks += 1;
-                List<Object> cols = new ArrayList<Object>();
-                cols.add(${v}Timestamp);
-                cols.add("'+");
-                cols.add(personName);
-                cols.add(allowanceAmountInUsd
-                    .divide(
-                        new BigDecimal(tasksPerWeek),
-                        2,
-                        RoundingMode.HALF_UP
-                    )
-                );
-                cols.add(${v}TasksValues.get(i).get(0));
-                cols.add("N"); // not approved yet
-                ${v}AppendValues.add(cols);
-                ${v}TakenTaskIndices.add(i);
-                lastAddedTaskIndex = i;
-            } // else skip other person's task
-            i = ((i + 1) % (${v}TasksValues.size() - 1)) + 1; // row 1 thru end
+                ${v}TakenTaskIndices.add(j+1);
+                System.out.printf("REQUIRED Person task %s %s %d\n", personName, ${v}TasksValues.get(j+1).get(0), j+1);
+            }
         }
 
         PersonAllowanceState state = new PersonAllowanceState.Builder()
-            .lastTaskIndex(lastAddedTaskIndex)
+            .lastTaskIndex(lastTaskIndex)
+            .captureTaskIndex(lastTaskIndex)
             .satisfiedTasks(satisfiedTasks)
             .personName(personName)
             .tasksPerWeek(tasksPerWeek)
@@ -162,7 +146,7 @@ cat << EOF
     }
 
     ${v}Once = false;
-    ${v}I = 0;
+    ${v}I = 0; // person index map (skips header, 0 is first data row)
     for (List row : ${v}Values) {
         if (!${v}Once) {
             ${v}Once = true;
@@ -171,13 +155,67 @@ cat << EOF
 
         PersonAllowanceState state = ${v}PersonStateMap.get(${v}I);
 
-        // task loop (no-priority pass: 2nd of 2 passes)
-        Integer i = ((state.lastTaskIndex + 1) % (${v}TasksValues.size()-1)) + 1; //1-end
-        Integer satisfiedTasks = 0;
-        for (Integer j = 0; j < ${v}TasksValues.size(); j++) {
+        // task loop (priority pass: 2nd of 3 passes)
+        Integer i = (state.lastTaskIndex % (${v}TasksValues.size()-1)) + 1; //1 thru end
+System.out.printf("Seeking starting at index: %d\n", i);
+        for (Integer j = 0; j < ${v}TasksValues.size()-1; j++) { // -1 to skip header
             // ignore j var
             boolean zeroTask = "Y".equals(
-                (String)${v}TasksValues.get(i).get(1)
+                ((String)${v}TasksValues.get(i).get(1)).toUpperCase()
+            ); // pays $0 but is expected to be completed
+            boolean isPersonTask = state.personName.equals(
+                (String)${v}TasksValues.get(i).get(2)
+            );
+            System.out.printf("%s %d %b %b %b\n", state.personName, i, !${v}TakenTaskIndices.contains(i), !zeroTask, isPersonTask);
+            if (
+                !${v}TakenTaskIndices.contains(i) && !zeroTask &&
+                state.satisfiedTasks < state.tasksPerWeek && isPersonTask
+            ) {
+                state.satisfiedTasks += 1;
+                List<Object> cols = new ArrayList<Object>();
+                cols.add(${v}Timestamp);
+                cols.add("'+");
+                cols.add(state.personName);
+                cols.add(state.allowanceInUsd
+                    .divide(
+                        new BigDecimal(state.tasksPerWeek),
+                        2,
+                        RoundingMode.HALF_UP
+                    )
+                );
+                cols.add(${v}TasksValues.get(i).get(0));
+                cols.add("N"); // not approved yet
+                ${v}AppendValues.add(cols);
+                ${v}TakenTaskIndices.add(i);
+                state.lastTaskIndex = i;
+                System.out.printf("priority loop %s %d %s\n", state.personName, i, ${v}TasksValues.get(i).get(0));
+            }
+            i = (i % (${v}TasksValues.size()-1)) + 1; // row 1 thru end
+        }
+        ${v}I += 1;
+    }
+
+    ${v}Once = false;
+    ${v}I = 0; // person index map (skips header, 0 is first data row)
+    for (List row : ${v}Values) {
+        if (!${v}Once) {
+            ${v}Once = true;
+            continue; // skip header row
+        }
+
+        PersonAllowanceState state = ${v}PersonStateMap.get(${v}I);
+
+        // reset the lastTaskIndex
+        if (state.satisfiedTasks < state.tasksPerWeek)
+            state.lastTaskIndex = state.captureTaskIndex;
+
+        // task loop (no-priority pass: 3rd of 3 passes)
+        Integer i = (state.lastTaskIndex % (${v}TasksValues.size()-1)) + 1; //1 thru end
+        Integer satisfiedTasks = 0;
+        for (Integer j = 0; j < ${v}TasksValues.size()-1; j++) {// -1 to skip header
+            // ignore j var
+            boolean zeroTask = "Y".equals(
+                ((String)${v}TasksValues.get(i).get(1)).toUpperCase()
             ); // pays $0 but is expected to be completed
 
             if (!${v}TakenTaskIndices.contains(j) && !zeroTask && state.satisfiedTasks < state.tasksPerWeek) {
@@ -198,10 +236,10 @@ cat << EOF
                 ${v}AppendValues.add(cols);
                 ${v}TakenTaskIndices.add(i);
                 state.lastTaskIndex = i;
+                System.out.printf("non-priority loop %s %d\n", state.personName, i);
             }
-            i = ((i + 1) % (${v}TasksValues.size() - 1)) + 1; // row 1 thru end
+            i = (i % (${v}TasksValues.size()-1)) + 1; // row 1 thru end
         }
-
 
         List<Object> updateCols = new ArrayList<Object>();
         updateCols.add(state.personName);

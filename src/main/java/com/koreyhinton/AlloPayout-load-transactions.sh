@@ -51,7 +51,7 @@ cat << EOF
         boolean zeroTask = amount.compareTo(BigDecimal.ZERO) == 0;
         if (zeroTask)
             continue;
-        if (!"Y".equals((String)row.get(5)))
+        if (!"Y".equals(((String)row.get(5)).toUpperCase()))
             continue;
 
         List<Object> cols = new ArrayList<Object>();
@@ -93,6 +93,6 @@ cat << EOF
             ${!spreadsheet_id},
             ${v}ClearRequest
         )
-        .execute();    
+        .execute();
 
 EOF

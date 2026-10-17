@@ -4,7 +4,7 @@ Allowance payout cron app. Java code is bash-assembled using [orc](https://githu
 
 ## Build
 
-`build.sh`
+`./build.sh`
 
 ## Run
 

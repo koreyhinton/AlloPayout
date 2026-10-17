@@ -15,7 +15,7 @@ build
 
 # generated files
 
-*.java
+src/main/java/com/koreyhinton/*.java
 
 # gradle optional build (to avoid potential secrets)
 gradle.properties
