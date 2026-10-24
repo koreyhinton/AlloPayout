@@ -55,6 +55,10 @@ The Java under review is generated, so check what bash actually emits:
 - New step scripts must be executable and spliced into `AlloPayout.sh` with
   their own prefix (`${v}xx_`).
 - New imports go in `AlloPayout.sh`. Missing imports only show up at compile time.
+- Control flow must be imperative (statements, `if`, loops). Flag new helper
+  classes, static utility methods, lambdas or streams. Reusable logic belongs
+  in a spliced step script with `<prefix>TextIn`/`<prefix>TextOut`-style
+  variables (see `AlloPayout-mobile-text-wrap.sh`).
 - Edits should be in the `.sh` files or `models/*.java`, never in the
   generated `AlloPayout.java` (it's gitignored and gets overwritten).
 

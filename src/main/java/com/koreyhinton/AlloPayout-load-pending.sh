@@ -67,7 +67,14 @@ cat << EOF
     if (${v}WeeklyValues == null || ${v}WeeklyValues.isEmpty())
         throw new Exception("No data found in sheet: Weekly Allowance");
 
-    List<List<Object>> ${v}AppendValues = new ArrayList<List<Object>>();
+    List<List<Object>> ${v}AppendPendingTasksValues = new ArrayList<List<Object>>();
+    // person name (= their tab name) -> rows of: Amount, Description
+    Map<String, List<List<Object>>> ${v}AppendPersonToChoresValues = new LinkedHashMap<>();
+    // a person tab must not overwrite one of these (lowercase: Sheets tab
+    // names are case-insensitive)
+    Set<String> ${v}ReservedTabs = Set.of(
+        "pending transactions", "transactions", "opx state", "tasks", "weekly allowance"
+    );
     List<List<Object>> ${v}UpdateValues = new ArrayList<List<Object>>();
 
     Set<Integer> ${v}TakenTaskIndices = new HashSet<>();
@@ -81,6 +88,9 @@ cat << EOF
             continue; // skip header row
         }
         String personName = (String)row.get(0);
+        if (${v}ReservedTabs.contains(personName.toLowerCase()))
+            throw new Exception("Person name matches an existing sheet tab: " + personName);
+        ${v}AppendPersonToChoresValues.put(personName, new ArrayList<List<Object>>());
 
         // lastTaskIndex's range is 1-n (or if set to 0 it is reassigned to n)
         Integer lastTaskIndex = Integer.parseInt((String)row.get(1));
@@ -126,7 +136,13 @@ cat << EOF
                 cols.add(new BigDecimal(0));
                 cols.add("REQUIRED " + ${v}TasksValues.get(j+1).get(0));
                 cols.add("N"); // not approved yet
-                ${v}AppendValues.add(cols);
+                ${v}AppendPendingTasksValues.add(cols);
+                String ${v}mob_wrap_TextIn = String.valueOf(cols.get(4));
+                ` ./AlloPayout-mobile-text-wrap.sh ${v}mob_wrap_ `
+                ${v}AppendPersonToChoresValues.get((String)cols.get(2)).add(List.<Object>of(
+                    ${!decimal_format}.format(cols.get(3)),
+                    ${v}mob_wrap_TextOut
+                ));
                 ${v}TakenTaskIndices.add(j+1);
                 System.out.printf("REQUIRED Person task %s %s %d\n", personName, ${v}TasksValues.get(j+1).get(0), j+1);
             }
@@ -187,7 +203,13 @@ System.out.printf("Seeking starting at index: %d\n", i);
                 );
                 cols.add(${v}TasksValues.get(i).get(0));
                 cols.add("N"); // not approved yet
-                ${v}AppendValues.add(cols);
+                ${v}AppendPendingTasksValues.add(cols);
+                String ${v}mob_wrap_TextIn = String.valueOf(cols.get(4));
+                ` ./AlloPayout-mobile-text-wrap.sh ${v}mob_wrap_ `
+                ${v}AppendPersonToChoresValues.get((String)cols.get(2)).add(List.<Object>of(
+                    ${!decimal_format}.format(cols.get(3)),
+                    ${v}mob_wrap_TextOut
+                ));
                 ${v}TakenTaskIndices.add(i);
                 state.lastTaskIndex = i;
                 System.out.printf("priority loop %s %d %s\n", state.personName, i, ${v}TasksValues.get(i).get(0));
@@ -235,7 +257,13 @@ System.out.printf("Seeking starting at index: %d\n", i);
                 );
                 cols.add(${v}TasksValues.get(i).get(0));
                 cols.add("N"); // not approved yet
-                ${v}AppendValues.add(cols);
+                ${v}AppendPendingTasksValues.add(cols);
+                String ${v}mob_wrap_TextIn = String.valueOf(cols.get(4));
+                ` ./AlloPayout-mobile-text-wrap.sh ${v}mob_wrap_ `
+                ${v}AppendPersonToChoresValues.get((String)cols.get(2)).add(List.<Object>of(
+                    ${!decimal_format}.format(cols.get(3)),
+                    ${v}mob_wrap_TextOut
+                ));
                 ${v}TakenTaskIndices.add(i);
                 state.lastTaskIndex = i;
                 System.out.printf("non-priority loop %s %d\n", state.personName, i);
@@ -251,8 +279,33 @@ System.out.printf("Seeking starting at index: %d\n", i);
         ${v}I += 1;
     }
 
+    // create any person tabs that don't exist yet. This runs before this step's
+    // other writes, so if it fails, Pending Transactions and Opx State are
+    // unchanged and a re-run assigns the same chores.
+    // Sheets tab names are case-insensitive, so compare lowercased.
+    Set<String> ${v}ExistingTabs = new HashSet<>();
+    for (Sheet tab : ${!sheet_service}.spreadsheets()
+            .get(${!spreadsheet_id}).execute().getSheets())
+        ${v}ExistingTabs.add(tab.getProperties().getTitle().toLowerCase());
+    List<Request> ${v}AddTabRequests = new ArrayList<>();
+    for (String personName : ${v}AppendPersonToChoresValues.keySet()) {
+        if (!${v}ExistingTabs.contains(personName.toLowerCase()))
+            ${v}AddTabRequests.add(new Request().setAddSheet(
+                new AddSheetRequest().setProperties(
+                    new SheetProperties().setTitle(personName)
+                )
+            ));
+    }
+    if (!${v}AddTabRequests.isEmpty())
+        ${!sheet_service}.spreadsheets()
+            .batchUpdate(
+                ${!spreadsheet_id},
+                new BatchUpdateSpreadsheetRequest().setRequests(${v}AddTabRequests)
+            )
+            .execute();
+
     ValueRange ${v}AppendValueRange = new ValueRange();
-    ${v}AppendValueRange.setValues(${v}AppendValues);
+    ${v}AppendValueRange.setValues(${v}AppendPendingTasksValues);
     AppendValuesResponse ${v}AppendResponse = ${!sheet_service}.spreadsheets().values()
         .append(
             ${!spreadsheet_id},
@@ -271,6 +324,45 @@ System.out.printf("Seeking starting at index: %d\n", i);
             ${v}UpdateValueRange
         )
         .setValueInputOption("USER_ENTERED")
+        .execute();
+
+    /* Person chore tabs (one per person, tab name = person name)
+        |---------+-------------------------------------------|
+        | A       | B                                         |
+        |---------+-------------------------------------------|
+        | Amount  | Description                               |
+        |---------+-------------------------------------------|
+        | \$2.00   | Wipe down the baseboards in your room an- |
+        |         | d clean your window                       |
+        |---------+-------------------------------------------|
+    */
+
+    // clear last week's rows (keep the header row), then write header + rows
+    List<String> ${v}ChoreClearRanges = new ArrayList<>();
+    List<ValueRange> ${v}ChoreWrites = new ArrayList<>();
+    for (Map.Entry<String, List<List<Object>>> entry
+            : ${v}AppendPersonToChoresValues.entrySet()) {
+        // quote for A1 notation: O'Neil -> 'O''Neil'
+        String tab = "'" + entry.getKey().replace("'", "''") + "'";
+        ${v}ChoreClearRanges.add(tab + "!A2:B");
+        List<List<Object>> rows = new ArrayList<List<Object>>();
+        rows.add(List.<Object>of("Amount", "Description"));
+        rows.addAll(entry.getValue());
+        ${v}ChoreWrites.add(new ValueRange().setRange(tab + "!A1").setValues(rows));
+    }
+    ${!sheet_service}.spreadsheets().values()
+        .batchClear(
+            ${!spreadsheet_id},
+            new BatchClearValuesRequest().setRanges(${v}ChoreClearRanges)
+        )
+        .execute();
+    ${!sheet_service}.spreadsheets().values()
+        .batchUpdate(
+            ${!spreadsheet_id},
+            new BatchUpdateValuesRequest()
+                .setValueInputOption("USER_ENTERED")
+                .setData(${v}ChoreWrites)
+        )
         .execute();
 
 EOF

@@ -24,6 +24,7 @@ The main Java class is **not checked in** — `src/main/java/com/koreyhinton/*.j
 
 - `AlloPayout.sh` emits the `AlloPayout` class (imports, env var checks, Sheets client setup, formatters) and inlines the two step scripts via backtick command substitution inside its heredoc.
 - `AlloPayout-load-transactions.sh` and `AlloPayout-load-pending.sh` emit Java statement blocks that are spliced into `main`.
+- `AlloPayout-mobile-text-wrap.sh` is a reusable step spliced into load-pending (see below).
 - Edit the `.sh` files, never the generated `AlloPayout.java`. Only `models/*.java` is hand-written Java.
 
 Variable namespacing convention (orc):
@@ -31,6 +32,22 @@ Variable namespacing convention (orc):
 - The parent `export`s mappings like `${v}lp_SheetService=${v}SheetService` so the child can reference the parent's variable.
 - In the child, `. ${NSMAP}/bind ${v} SheetService SpreadsheetId ...` defines snake_case bash vars (`sheet_service`, `spreadsheet_id`, ...) holding the resolved Java variable name; Java code references them via indirection, e.g. `${!sheet_service}`. Any new shared variable needs both the parent `export` and the child `bind` entry.
 - Because the Java lives in unquoted heredocs, `$` and backticks in Java code must be escaped.
+
+### Code style: imperative only
+
+Control flow must be imperative: plain statements, `if`, and loops, all assembled by bash splicing. Don't write helper classes, static utility methods, lambdas or streams for logic. `models/*.java` holds data types only.
+
+Reusable logic is a separate step script spliced in where it's needed, with input/output variables instead of a function signature. For example, `AlloPayout-mobile-text-wrap.sh`:
+
+```java
+String ${v}mob_wrap_TextIn = String.valueOf(cols.get(4));
+` ./AlloPayout-mobile-text-wrap.sh ${v}mob_wrap_ `
+// ...then read ${v}mob_wrap_TextOut
+```
+
+- The caller declares the step's input as `<prefix>TextIn` and reads its output from `<prefix>TextOut`. The step declares the output and its own `${v}` locals.
+- The step does `. ${NSMAP}/bind ${v} TextIn TextOut` with no parent `export`. When no mapping exists, `bind` falls back to the step's own prefixed name, so `${!text_in}` is `<prefix>TextIn`.
+- Splicing the same step more than once is fine when each copy is in its own block (`{ }`, `if`, loop body), since the names repeat.
 
 ## Spreadsheet model
 
@@ -40,6 +57,7 @@ Sheet tabs (column layouts are drawn as ASCII tables in comments in the step scr
 - **Opx State** (A:B: Person, last task index; written back starting at `A2`, one row per person)
 - **Tasks** (A:C: Task, Sticky Y/N, Priority Person; blank Sticky or Priority Person cells are treated as empty)
 - **Weekly Allowance** (A:C: Person, Amount, Tasks per week)
+- **One tab per person**, named after them (A:B: Amount, Description): a mobile-friendly copy of that person's new pending rows. Descriptions are hard-wrapped every 40 chars, with `-` on a split word (`AlloPayout-mobile-text-wrap.sh`). Tabs are created if missing. A person named like a fixed tab above is rejected.
 
 Run order in `main`:
 1. **load-transactions**: copies rows from Pending Transactions with Approved=`Y` and a non-zero amount into Transactions, then clears all data rows of Pending Transactions.
@@ -48,6 +66,6 @@ Run order in `main`:
    - priority pass: non-sticky tasks where they are the Priority Person
    - fill pass: any untaken non-sticky task until `tasksPerWeek` is met
 
-   Each assigned task pays `Amount / tasksPerWeek` (rounded HALF_UP to cents). Tasks taken by one person are skipped for later people (`TakenTaskIndices`). The new rows are appended to Pending Transactions and last indices are written to Opx State.
+   Each assigned task pays `Amount / tasksPerWeek` (rounded HALF_UP to cents). Tasks taken by one person are skipped for later people (`TakenTaskIndices`). The new rows are appended to Pending Transactions (`AppendPendingTasksValues`), last indices are written to Opx State, and each person's tab is cleared below the header and rewritten (`AppendPersonToChoresValues`).
 
 Sheet-writing details: values use `USER_ENTERED`, so a `+` type has to be written as `'+` to stay text; amounts are parsed with a US currency `DecimalFormat` that returns `BigDecimal`.

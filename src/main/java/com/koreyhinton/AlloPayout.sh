@@ -40,8 +40,14 @@ cat << EOF
     import com.google.api.client.json.JsonFactory;
     import com.google.api.client.json.gson.GsonFactory;
     import com.google.api.client.util.store.FileDataStoreFactory;
+    import com.google.api.services.sheets.v4.model.AddSheetRequest;
     import com.google.api.services.sheets.v4.model.AppendValuesResponse;
     import com.google.api.services.sheets.v4.model.BatchClearValuesRequest;
+    import com.google.api.services.sheets.v4.model.BatchUpdateSpreadsheetRequest;
+    import com.google.api.services.sheets.v4.model.BatchUpdateValuesRequest;
+    import com.google.api.services.sheets.v4.model.Request;
+    import com.google.api.services.sheets.v4.model.Sheet;
+    import com.google.api.services.sheets.v4.model.SheetProperties;
     import com.google.api.services.sheets.v4.model.UpdateValuesResponse;
     import com.google.api.services.sheets.v4.model.ValueRange;
     import com.google.api.services.sheets.v4.Sheets;
@@ -61,6 +67,7 @@ cat << EOF
     import java.util.Collections;
     import java.util.HashMap;
     import java.util.HashSet;
+    import java.util.LinkedHashMap;
     import java.util.List;
     import java.util.Locale;
     import java.util.Map;

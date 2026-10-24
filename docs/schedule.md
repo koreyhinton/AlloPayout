@@ -107,3 +107,44 @@ Next set permissions on the file:
 sudo chmod 755 /etc/cron.weekly/AlloPayout
 ```
 
+## Deploy a new jar version
+
+Use this to replace the jar after a code change. The user, directories,
+credentials and the `/etc/cron.weekly/AlloPayout` script stay as they are, so
+only the jar is copied. If a change adds a new env var, also update the cron
+script above.
+
+Build the jar on the local machine:
+
+```sh
+./build.sh
+```
+
+### Copy the new jar
+
+Copy the jar from the local machine. Due to permissions you might need to copy
+somewhere else (your home dir) and move if you get a copy access error.
+
+```sh
+scp ./build/libs/AlloPayout.jar myssh:/srv/AlloPayout/app.jar
+```
+
+### Finalize
+
+ssh to the remote VPS server and reset the ownership and permissions to
+match the original install:
+
+```sh
+sudo chown root:root /srv/AlloPayout/app.jar
+sudo chmod 644 /srv/AlloPayout/app.jar
+ls -l /srv/AlloPayout/
+```
+
+```
+# something in this format:
+-rw-r--r-- 1 root root ... app.jar
+```
+
+Don't run the jar to test it: every run writes to the real spreadsheet. The
+new version runs at the next `cron.weekly` time. Check the newest log in
+`/var/log/AlloPayout/` after that run.
