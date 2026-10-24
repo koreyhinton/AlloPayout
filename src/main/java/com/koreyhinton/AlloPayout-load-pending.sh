@@ -30,21 +30,23 @@ cat << EOF
         throw new Exception("No data found in sheet: Opx State");
 
     /* Tasks
-        |--------------------+--------+-------------------+-------------------|
-        | A                  | B      | C                 | D                 |
-        |--------------------+--------+-------------------+-------------------|
-        | Task               | Sticky | Priority Person 1 | Priority Person 2 |
-        |--------------------+--------+-------------------+-------------------|
-        | Play with the cats | N      | Alice             | Bob               |
-        |--------------------+--------+-------------------+-------------------|
+        |--------------------+--------+-----------------|
+        | A                  | B      | C               |
+        |--------------------+--------+-----------------|
+        | Task               | Sticky | Priority Person |
+        |--------------------+--------+-----------------|
+        | Play with the cats | N      | Alice           |
+        |--------------------+--------+-----------------|
     */
-    String ${v}TasksRange = "Tasks!A:D";
+    String ${v}TasksRange = "Tasks!A:C";
     ValueRange ${v}TasksResponse = ${!sheet_service}.spreadsheets().values()
         .get(${!spreadsheet_id}, ${v}TasksRange)
         .execute();
     List<List<Object>> ${v}TasksValues = ${v}TasksResponse.getValues();
     if (${v}TasksValues == null || ${v}TasksValues.isEmpty())
         throw new Exception("No data found in sheet: Tasks");
+    if (${v}TasksValues.size() < 2)
+        throw new Exception("No tasks found in sheet: Tasks (only the header row)");
 
     /* Weekly Allowance
         |--------+--------+----------------|
@@ -109,10 +111,10 @@ cat << EOF
             // j + 1 for everything to start at the data row
             System.out.printf("%d\n", j+1);
             boolean zeroTask = "Y".equals(
-                ((String)${v}TasksValues.get(j+1).get(1)).toUpperCase()
+                (${v}TasksValues.get(j+1).size() > 1 ? (String)${v}TasksValues.get(j+1).get(1) : "").toUpperCase()
             ); // pays $0 but is expected to be completed
             boolean isPersonTask = personName.equals(
-                (String)${v}TasksValues.get(j+1).get(2)
+                (${v}TasksValues.get(j+1).size() > 2 ? (String)${v}TasksValues.get(j+1).get(2) : "")
             );
             boolean isPersonStickyTask = zeroTask && isPersonTask;
             // System.out.printf("%d %b %b\n", j+1, zeroTask, isPersonTask);
@@ -161,10 +163,10 @@ System.out.printf("Seeking starting at index: %d\n", i);
         for (Integer j = 0; j < ${v}TasksValues.size()-1; j++) { // -1 to skip header
             // ignore j var
             boolean zeroTask = "Y".equals(
-                ((String)${v}TasksValues.get(i).get(1)).toUpperCase()
+                (${v}TasksValues.get(i).size() > 1 ? (String)${v}TasksValues.get(i).get(1) : "").toUpperCase()
             ); // pays $0 but is expected to be completed
             boolean isPersonTask = state.personName.equals(
-                (String)${v}TasksValues.get(i).get(2)
+                (${v}TasksValues.get(i).size() > 2 ? (String)${v}TasksValues.get(i).get(2) : "")
             );
             System.out.printf("%s %d %b %b %b\n", state.personName, i, !${v}TakenTaskIndices.contains(i), !zeroTask, isPersonTask);
             if (
@@ -215,10 +217,10 @@ System.out.printf("Seeking starting at index: %d\n", i);
         for (Integer j = 0; j < ${v}TasksValues.size()-1; j++) {// -1 to skip header
             // ignore j var
             boolean zeroTask = "Y".equals(
-                ((String)${v}TasksValues.get(i).get(1)).toUpperCase()
+                (${v}TasksValues.get(i).size() > 1 ? (String)${v}TasksValues.get(i).get(1) : "").toUpperCase()
             ); // pays $0 but is expected to be completed
 
-            if (!${v}TakenTaskIndices.contains(j) && !zeroTask && state.satisfiedTasks < state.tasksPerWeek) {
+            if (!${v}TakenTaskIndices.contains(i) && !zeroTask && state.satisfiedTasks < state.tasksPerWeek) {
                 state.satisfiedTasks += 1;
                 List<Object> cols = new ArrayList<Object>();
                 cols.add(${v}Timestamp);
@@ -265,7 +267,7 @@ System.out.printf("Seeking starting at index: %d\n", i);
     UpdateValuesResponse ${v}UpdateResponse = ${!sheet_service}.spreadsheets().values()
         .update(
             ${!spreadsheet_id},
-            "Opx State!A2:B3", // skip header row
+            "Opx State!A2:B" + (${v}UpdateValues.size() + 1), // skip header row
             ${v}UpdateValueRange
         )
         .setValueInputOption("USER_ENTERED")
